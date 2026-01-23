@@ -15,7 +15,7 @@
 | **미만형선암 (STDI)** | PNG : JSON | 2,500 |
 | **혼합형선암 (STMX)** | PNG : JSON | 2,500 |
 
-## 엉 2. 어노테이션 구조 (Annotation Format)
+## 2. 어노테이션 구조 (Annotation Format)
 데이터 로더(`data_loader.py`) 구현 시 다음의 JSON 구조를 참조합니다.
 
 ### 2.1 Clinical Information (임상 정보)
