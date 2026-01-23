@@ -26,6 +26,23 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# --- 기존 파이썬 설정들 아래에 추가하세요 ---
+
+# AI Hub Data (69GB 대용량 데이터 폴더 통째로 제외)
+data/
+datasets/
+
+# 압축 파일 제외
+*.zip
+*.tar
+*.gz
+
+# 가상환경 및 설정 파일
+venv/
+.env
+.vscode/
+.idea/
+
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
