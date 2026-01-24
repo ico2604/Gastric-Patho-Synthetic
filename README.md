@@ -6,7 +6,9 @@
 ---
 
 ## 📊 1. 데이터셋 구성 (Dataset Statistics)
-총 10,000장의 고해상도(1024x1024) PNG 이미지와 JSON 어노테이션으로 구성되어 있습니다.
+- **총 수량**: 고해상도(1024x1024) 이미지 및 JSON 10,000 세트
+- **병리 분류 (Clf)**: 위염(STNT), 장형선암(STIN), 미만형선암(STDI), 혼합형선암(STMX) 각 2,500장
+- **세포 분할 (Seg)**: 종양(Tumor), 기질(Stroma), 정상(Normal), 면역(Immune) 4개 클래스
 
 | 데이터 분류 | 데이터 형식 | 수량 (Patches) |
 | :--- | :--- | :--- |
@@ -15,60 +17,27 @@
 | **미만형선암 (STDI)** | PNG : JSON | 2,500 |
 | **혼합형선암 (STMX)** | PNG : JSON | 2,500 |
 
-## 2. 어노테이션 구조 (Annotation Format)
-데이터 로더(`data_loader.py`) 구현 시 다음의 JSON 구조를 참조합니다.
+## 🏗️ 2. 모델 라인업 (Model Zoo)
+| Task | Models | Framework |
+| :--- | :--- | :--- |
+| **Classification** | ResNet50, EfficientNet-V2, Swin-T, DenseNet121 | PyTorch 2.4.1 |
+| **Segmentation** | U-Net, U-Net++, DeepLabV3+, SAM | PyTorch 2.4.1 |
 
-### 2.1 Clinical Information (임상 정보)
-- `tumor_code`: "STOP" (위암 병리 코드)
-- `category`: 병리 분류 (STNT, STIN, STDI, STMX)
-- `tumor_category`: "normal" (위염) / "abnormal" (선암 3종)
-- `diagnosis`: 상세 진단명 및 판독문 텍스트
-
-### 2.2 Image & Object Information (이미지 및 객체)
-- **Size**: 1024 x 1024 (MPP 정보 포함)
-- **Type**: 합성 데이터(S) 위주 구성
-- **Segmentation Label**:
-  - `Tumor`: 종양 세포
-  - `Stroma`: 기질
-  - `Normal`: 정상 조직
-  - `Immune`: 면역 세포
-- **Format**: `polygon` 좌표 기반 [X, Y] 리스트
-
-## 👨‍💻 프로젝트 팀 및 역할
-- **팀원 1**: 데이터 파이프라인 구축 및 JSON 파싱 (Polygon to Mask 변환)
-- **팀원 2**: Vision 모델 구현 (U-Net++, DeepLabV3+ 등)
-- **팀원 3**: NLP 모델 구현 (판독문 텍스트 기반 분류 및 생성 연구)
-- **팀원 4**: 멀티모달 통합 및 성능 평가 (mIoU, Dice Score, F1-Score)
-
-## 📁 디렉토리 구조
+## 📁 3. 디렉토리 구조 (Directory Structure)
 ```text
+Gastric-Patho-Synthetic/
 ├── data/
-├── Training/
-│   ├── 01.원천데이터/          # 학습용 PNG 이미지
-│   │   ├── TS_미만형선암/
-│   │   ├── TS_위염/
-│   │   ├── TS_장형선암/
-│   │   └── TS_혼합형선암/
-│   └── 02.라벨링데이터/        # 학습용 JSON 어노테이션
-│       ├── TS_미만형선암/
-│       ├── TS_위염/
-│       ├── TS_장형선암/
-│       └── TS_혼합형선암/
-└── Validation/
-    ├── 01.원천데이터/          # 검증용 PNG 이미지
-    │   ├── VS_미만형선암/
-    │   ├── VS_위염/
-    │   ├── VS_장형선암/
-    │   └── VS_혼합형선암/
-    └── 02.라벨링데이터/        # 검증용 JSON 어노테이션
-        ├── VS_미만형선암/
-        ├── VS_위염/
-        ├── VS_장형선암/
-        └── VS_혼합형선암/
+│   ├── raw/                 # AI_Hub 원본 데이터 (Raw Data)
+│   │   ├── Training/        # [원천데이터/라벨링데이터 하위 구조 생략]
+│   │   └── Validation/
+│   └── processed/           # 전처리 완료된 데이터 (학습에 직접 사용)
+│       ├── images_512/      # 512x512 리사이징 이미지 (분류용)
+│       └── masks/           # JSON을 변환한 Binary Mask PNG (세그멘테이션용)
+├── checkpoints/             # 학습된 모델(.pth) 저장소
 ├── src/
-│   ├── utils/
-│   │   └── mask_utils.py # Polygon 좌표를 binary mask로 변환하는 모듈
-│   ├── train_vision.py
-│   └── train_nlp.py
+│   ├── data_loader.py       # JSON 파싱 및 Mask 변환 핵심 모듈
+│   ├── preprocess.py        # 리사이징 및 마스크 생성 자동화 스크립트
+│   ├── classification/      # 분류 팀: models.py, train.py, val.py
+│   └── segmentation/        # 세그멘테이션 팀: models.py, train.py, val.py
 ├── requirements.txt
 └── README.md
