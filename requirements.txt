@@ -1,0 +1,26 @@
+# [Core Framework]
+# 최신 PyTorch 환경 (CUDA 12.1/12.4 호환 권장)
+torch==2.4.1
+torchvision==0.19.1
+torchaudio==2.4.1
+
+# [Vision Library]
+# EfficientNet, Swin-T, ResNet 등 다양한 모델 아카이브 제공
+timm==1.0.9 
+# SAM(Segment Anything) 및 최신 세그멘테이션 모델 지원
+segment-anything==1.0
+segmentation-models-pytorch==0.3.4
+
+# [Medical Image Processing]
+# 의료 데이터 전처리 및 Polygon 변환용
+opencv-python==4.10.0.84
+scikit-image==0.24.0
+numpy==1.26.4
+albumentations==1.4.15  # 헬스케어 특화 데이터 증강(Augmentation)
+
+# [Utilities]
+scikit-learn==1.5.2     # F1-Score, Confusion Matrix 등 평가 지표
+tqdm==4.66.5            # 진행 표시바
+pandas==2.2.2           # JSON 데이터를 표 형태로 정리
+matplotlib==3.9.2       # 결과 시각화
+pycocotools==2.0.8      # Polygon 좌표 처리 및 평가용
