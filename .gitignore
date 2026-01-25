@@ -29,7 +29,10 @@ MANIFEST
 # --- 기존 파이썬 설정들 아래에 추가하세요 ---
 
 # AI Hub Data (69GB 대용량 데이터 폴더 통째로 제외)
-# data/
+data/**/*.jpg
+data/**/*.jpeg
+data/**/*.png
+data/**/*.json
 datasets/
 
 # 압축 파일 제외
