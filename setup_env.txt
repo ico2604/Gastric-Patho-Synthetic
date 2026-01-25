@@ -1,0 +1,14 @@
+# 1. 프로젝트 폴더로 확실히 이동
+cd "...\Gastric-Patho-Synthetic"
+
+# 2. 파이썬 3.12로 가상환경 생성 (이름은 .venv로 통일합시다)
+py -3.12 -m venv .venv
+
+# 3. 가상환경 활성화
+.\.venv\Scripts\activate
+
+# 4. pip 최신화
+python -m pip install --upgrade pip
+
+# 5. 라이브러리 한꺼번에 설치
+pip install -r requirements.txt

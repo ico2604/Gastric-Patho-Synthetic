@@ -29,7 +29,7 @@ MANIFEST
 # --- 기존 파이썬 설정들 아래에 추가하세요 ---
 
 # AI Hub Data (69GB 대용량 데이터 폴더 통째로 제외)
-data/
+# data/
 datasets/
 
 # 압축 파일 제외
@@ -44,9 +44,9 @@ venv/
 .idea/
 
 # 모델 체크포인트 제외
-checkpoints/
-*.pth
-*.onnx
+# checkpoints/
+# *.pth
+# *.onnx
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
