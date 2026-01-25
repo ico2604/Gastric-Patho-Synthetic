@@ -17,34 +17,47 @@ class GastricDataset(Dataset):
             print(f"❌ 경고: {img_dir} 경로를 찾을 수 없습니다.")
             return
 
-        # 카테고리별 순회
         categories = sorted(os.listdir(img_dir))
         for cat in categories:
             cat_dir = os.path.join(img_dir, cat)
             if not os.path.isdir(cat_dir): continue
             
-            # 정렬을 해서 이미지와 마스크의 순서가 꼬이지 않게 보장합니다.
+            # [수정] 마스크 폴더명 대응: TS_ -> TL_ / VS_ -> VL_
+            mask_cat = cat.replace("TS_", "TL_").replace("VS_", "VL_")
+            
             files = sorted([f for f in os.listdir(cat_dir) if f.endswith('.png')])
             
             for f in files:
                 self.img_paths.append(os.path.join(cat_dir, f))
                 if task == 'seg' and mask_dir:
-                    self.mask_paths.append(os.path.join(mask_dir, cat, f))
+                    # 수정된 mask_cat을 사용하여 경로 생성
+                    self.mask_paths.append(os.path.join(mask_dir, mask_cat, f))
 
     def __len__(self):
         return len(self.img_paths)
 
     def __getitem__(self, idx):
-        image = cv2.imread(self.img_paths[idx])
-        if image is None: # 파일 손상 대비
-            raise FileNotFoundError(f"이미지를 읽을 수 없습니다: {self.img_paths[idx]}")
+        # --- 수정 시작: 한글 경로 대응 읽기 방식 ---
+        img_path = self.img_paths[idx]
+        
+        # 1. 이미지 읽기
+        img_array = np.fromfile(img_path, np.uint8)
+        image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        
+        if image is None:
+            raise FileNotFoundError(f"이미지를 읽을 수 없습니다: {img_path}")
             
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
         if self.task == 'seg':
-            mask = cv2.imread(self.mask_paths[idx], cv2.IMREAD_GRAYSCALE)
+            mask_path = self.mask_paths[idx]
+            # 2. 마스크 읽기
+            mask_array = np.fromfile(mask_path, np.uint8)
+            mask = cv2.imdecode(mask_array, cv2.IMREAD_GRAYSCALE)
+            
             if mask is None:
-                raise FileNotFoundError(f"마스크를 읽을 수 없습니다: {self.mask_paths[idx]}")
+                raise FileNotFoundError(f"마스크를 읽을 수 없습니다: {mask_path}")
+        # --- 수정 끝 ---
             
             if self.transform:
                 augmented = self.transform(image=image, mask=mask)
@@ -92,15 +105,15 @@ def get_transforms(task='clf', size=512, is_train=True):
     return A.Compose(list_transforms)
 
 def get_loader(img_dir, mask_dir, batch_size, transform, task='clf', shuffle=True):
-    # [수정] transform을 외부에서 주입받도록 변경
     dataset = GastricDataset(img_dir, mask_dir, transform=transform, task=task)
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, 
-                      num_workers=4, pin_memory=True)
+                      num_workers=0, # 윈도우 테스트 시에는 0으로 설정하는 것이 안전합니다.
+                      pin_memory=True)
 
 if __name__ == "__main__":
     # 이 블록은 'python data_loader.py'라고 직접 실행할 때만 작동합니다.
     print("🚀 데이터 로더 테스트를 시작합니다...")
-    
+    print("torch.cuda", torch.cuda.is_available())
     # 1. 전처리된 데이터가 있는지 확인용 경로 (실제 경로에 맞춰 수정)
     IMG_DIR = "data/processed/images_512/Training"
     MASK_DIR = "data/processed/masks/Training"
