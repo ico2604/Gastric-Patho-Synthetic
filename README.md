@@ -41,3 +41,11 @@ Gastric-Patho-Synthetic/
 │   └── segmentation/        # 세그멘테이션 팀: models.py, train.py, val.py
 ├── requirements.txt
 └── README.md
+```
+## 🛠 실행 순서 (Workflow)
+
+가장 권장되는 실행 순서는 다음과 같습니다:
+
+1. **`preprocessing.py`**: 전체 데이터의 라벨 리스트를 먼저 만듭니다.
+2. **`movetotest.py`**: 평가에 쓸 소중한 테스트 데이터를 먼저 따로 떼어놓습니다.
+3. **`delete_train.py`**: 남은 학습 데이터가 너무 많다면 적절한 사이즈로 줄입니다.
