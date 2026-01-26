@@ -22,25 +22,23 @@ class GastricDataset(Dataset):
             cat_dir = os.path.join(img_dir, cat)
             if not os.path.isdir(cat_dir): continue
             
-            # [수정] 마스크 폴더명 대응: TS_ -> TL_ / VS_ -> VL_
-            mask_cat = cat.replace("TS_", "TL_").replace("VS_", "VL_")
+            # [핵심 수정] Test 규칙(SS -> SL) 추가 반영
+            mask_cat = cat.replace("TS_", "TL_").replace("VS_", "VL_").replace("SS_", "SL_")
             
             files = sorted([f for f in os.listdir(cat_dir) if f.endswith('.png')])
             
             for f in files:
                 self.img_paths.append(os.path.join(cat_dir, f))
                 if task == 'seg' and mask_dir:
-                    # 수정된 mask_cat을 사용하여 경로 생성
                     self.mask_paths.append(os.path.join(mask_dir, mask_cat, f))
 
     def __len__(self):
         return len(self.img_paths)
 
     def __getitem__(self, idx):
-        # --- 수정 시작: 한글 경로 대응 읽기 방식 ---
         img_path = self.img_paths[idx]
         
-        # 1. 이미지 읽기
+        # 1. 이미지 읽기 (한글 경로 대응)
         img_array = np.fromfile(img_path, np.uint8)
         image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         
@@ -51,13 +49,12 @@ class GastricDataset(Dataset):
         
         if self.task == 'seg':
             mask_path = self.mask_paths[idx]
-            # 2. 마스크 읽기
+            # 2. 마스크 읽기 (한글 경로 대응)
             mask_array = np.fromfile(mask_path, np.uint8)
             mask = cv2.imdecode(mask_array, cv2.IMREAD_GRAYSCALE)
             
             if mask is None:
                 raise FileNotFoundError(f"마스크를 읽을 수 없습니다: {mask_path}")
-        # --- 수정 끝 ---
             
             if self.transform:
                 augmented = self.transform(image=image, mask=mask)
@@ -71,7 +68,6 @@ class GastricDataset(Dataset):
             return image, torch.tensor(label, dtype=torch.long)
 
     def _get_label_from_path(self, path):
-        # 대소문자 및 폴더명 변동에 강한 구조
         path_upper = path.upper()
         if "위염" in path or "STNT" in path_upper: return 0
         if "장형" in path or "STIN" in path_upper: return 1
@@ -79,24 +75,16 @@ class GastricDataset(Dataset):
         return 3 # STMX
 
 def get_transforms(task='clf', size=512, is_train=True):
-    """
-    [심화] is_train 인자를 추가해 학습 시에는 '데이터 증강'을 넣고
-    검증/테스트 시에는 '크기 조절'만 하도록 설정합니다.
-    """
     list_transforms = []
-    
-    # 1. 크기 조절 (공통)
     list_transforms.append(A.Resize(size, size))
     
-    # 2. 데이터 증강 (학습 때만 적용)
     if is_train:
         list_transforms.extend([
-            A.HorizontalFlip(p=0.5), # 좌우 반전
-            A.VerticalFlip(p=0.5),   # 상하 반전 (병리 이미지는 방향이 무관하므로 필수)
-            A.RandomRotate90(p=0.5), # 90도 회전
+            A.HorizontalFlip(p=0.5),
+            A.VerticalFlip(p=0.5),
+            A.RandomRotate90(p=0.5),
         ])
     
-    # 3. 정규화 및 텐서 변환 (공통)
     list_transforms.extend([
         A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ToTensorV2()
@@ -107,24 +95,24 @@ def get_transforms(task='clf', size=512, is_train=True):
 def get_loader(img_dir, mask_dir, batch_size, transform, task='clf', shuffle=True):
     dataset = GastricDataset(img_dir, mask_dir, transform=transform, task=task)
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, 
-                      num_workers=0, # 윈도우 테스트 시에는 0으로 설정하는 것이 안전합니다.
+                      num_workers=0, 
                       pin_memory=True)
 
 if __name__ == "__main__":
-    # 이 블록은 'python data_loader.py'라고 직접 실행할 때만 작동합니다.
     print("🚀 데이터 로더 테스트를 시작합니다...")
-    print("torch.cuda", torch.cuda.is_available())
-    # 1. 전처리된 데이터가 있는지 확인용 경로 (실제 경로에 맞춰 수정)
-    IMG_DIR = "data/processed/images_512/Training"
-    MASK_DIR = "data/processed/masks/Training"
+    print(f"torch.cuda available: {torch.cuda.is_available()}")
+    
+    # 테스트하고 싶은 스플릿을 선택하세요: Training, Validation, Test
+    SPLIT = "Test" 
+    IMG_DIR = f"data/processed/images_512/{SPLIT}"
+    MASK_DIR = f"data/processed/masks/{SPLIT}"
     
     if not os.path.exists(IMG_DIR):
-        print("❌ 에러: 전처리된 데이터가 없습니다. preprocess.py를 먼저 실행하세요.")
+        print(f"❌ 에러: {SPLIT} 데이터가 없습니다. 먼저 전처리하세요.")
     else:
-        # 2. 트랜스폼 생성
-        test_transform = get_transforms(task='seg', size=512, is_train=True)
+        # 테스트 시에는 is_train=False로 두어 증강 없이 리사이즈만 확인 가능
+        test_transform = get_transforms(task='seg', size=512, is_train=False)
         
-        # 3. 로더 생성 (배치 사이즈 2로 테스트)
         test_loader = get_loader(
             img_dir=IMG_DIR,
             mask_dir=MASK_DIR,
@@ -133,8 +121,7 @@ if __name__ == "__main__":
             task='seg'
         )
         
-        # 4. 첫 번째 배치만 가져와보기
         images, masks = next(iter(test_loader))
-        print(f"✅ 이미지 배치 크기: {images.shape}") # [2, 3, 512, 512] 예상
-        print(f"✅ 마스크 배치 크기: {masks.shape}") # [2, 512, 512] 예상
-        print("🎉 데이터 로더가 정상적으로 작동합니다!")
+        print(f"✅ [{SPLIT}] 이미지 배치 크기: {images.shape}")
+        print(f"✅ [{SPLIT}] 마스크 배치 크기: {masks.shape}")
+        print("🎉 데이터 로더가 모든 스플릿에 대해 정상 작동합니다!")
