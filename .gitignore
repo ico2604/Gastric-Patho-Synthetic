@@ -33,7 +33,9 @@ data/**/*.jpg
 data/**/*.jpeg
 data/**/*.png
 data/**/*.json
+data/**/*.csv
 datasets/
+logs/
 
 # 압축 파일 제외
 *.zip
