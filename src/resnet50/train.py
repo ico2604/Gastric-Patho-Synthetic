@@ -2,28 +2,27 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
-import matplotlib
-matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 import pandas as pd
 import os
 import sys
 import shutil
 import timm
-from datetime import datetime
-from sklearn.metrics import confusion_matrix, classification_report
-import seaborn as sns # 혼동 행렬 시각화용
 import numpy as np
+from datetime import datetime
+from sklearn.metrics import confusion_matrix, classification_report, roc_auc_score
+import seaborn as sns
+from torch.nn import functional as F
 
 # --- 경로 설정 ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.join(BASE_DIR, "src"))
 from data_loader import get_loader, get_transforms
 
-# --- 상세 설정 ---
+# --- 하이퍼파라미터 및 상세 설정 ---
 IMG_TRAIN_DIR = os.path.join(BASE_DIR, "data", "processed", "images_512", "Training")
 IMG_VAL_DIR = os.path.join(BASE_DIR, "data", "processed", "images_512", "Validation")
-IMG_TEST_DIR = os.path.join(BASE_DIR, "data", "processed", "images_512", "Test") # Test 경로 추가
+IMG_TEST_DIR = os.path.join(BASE_DIR, "data", "processed", "images_512", "Test")
 SAVE_DIR = os.path.join(BASE_DIR, "checkpoints")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(SAVE_DIR, exist_ok=True)
@@ -31,37 +30,43 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 MODEL_PATH = os.path.join(SAVE_DIR, "resnet50_best.pth")
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+LOG_FILE = os.path.join(LOG_DIR, f"train_log_{TIMESTAMP}.csv")
+PLOT_FILE = os.path.join(LOG_DIR, f"result_plot_{TIMESTAMP}.png")
 
-# 클래스 이름 정의 (시각화용)
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+BATCH_SIZE = 16
+LEARNING_RATE = 0.0001
+EPOCHS = 10
+PATIENCE = 5  # Early Stopping: 5에폭 동안 개선 없으면 종료
 CLASS_NAMES = ['Gastritis', 'STIN', 'STDI', 'STMX']
 
+# --- 모델 생성 함수 ---
 def create_model():
     print(f"📡 ResNet-50 모델 로드 중... (Device: {DEVICE})")
-    model = timm.create_model('resnet50', pretrained=True, num_classes=4)
+    model = timm.create_model('resnet50', pretrained=True, num_classes=len(CLASS_NAMES))
     if os.path.exists(MODEL_PATH):
         print(f"🔄 기존 학습된 가중치 로드: {MODEL_PATH}")
         model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
     return model.to(DEVICE)
 
+# --- 학습 및 검증 함수 (Early Stopping 포함) ---
 def train_and_validate(model, train_loader, val_loader):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     
-    # 상세 기록을 위한 리스트
     history = []
-    best_acc = 0.0
+    best_val_loss = float('inf')
+    early_stop_counter = 0
 
     print(f"🚀 학습 시작: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     for epoch in range(EPOCHS):
         epoch_start_time = datetime.now()
         
-        # --- Training Step ---
+        # Training Step
         model.train()
         train_loss, train_correct = 0.0, 0
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Train]")
-        for images, labels in pbar:
+        for images, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Train]"):
             images, labels = images.to(DEVICE), labels.to(DEVICE)
             optimizer.zero_grad()
             outputs = model(images)
@@ -70,11 +75,9 @@ def train_and_validate(model, train_loader, val_loader):
             optimizer.step()
             
             train_loss += loss.item()
-            _, preds = torch.max(outputs, 1)
-            train_correct += torch.sum(preds == labels.data)
-            pbar.set_postfix(loss=f"{loss.item():.4f}")
+            train_correct += (outputs.argmax(1) == labels).sum().item()
 
-        # --- Validation Step ---
+        # Validation Step
         model.eval()
         val_loss, val_correct = 0.0, 0
         with torch.no_grad():
@@ -83,164 +86,205 @@ def train_and_validate(model, train_loader, val_loader):
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item()
-                _, preds = torch.max(outputs, 1)
-                val_correct += torch.sum(preds == labels.data)
+                val_correct += (outputs.argmax(1) == labels).sum().item()
 
-        # 수치 계산
-        t_loss = train_loss / len(train_loader)
-        t_acc = (train_correct.double() / len(train_loader.dataset)).item()
-        v_loss = val_loss / len(val_loader)
-        v_acc = (val_correct.double() / len(val_loader.dataset)).item()
+        t_loss, v_loss = train_loss/len(train_loader), val_loss/len(val_loader)
+        t_acc, v_acc = train_correct/len(train_loader.dataset), val_correct/len(val_loader.dataset)
         duration = (datetime.now() - epoch_start_time).total_seconds()
 
-        # 상세 기록 저장 (딕셔너리 형태)
-        epoch_log = {
-            "epoch": epoch + 1,
-            "train_loss": round(t_loss, 4),
-            "train_acc": round(t_acc, 4),
-            "val_loss": round(v_loss, 4),
-            "val_acc": round(v_acc, 4),
-            "duration_sec": round(duration, 2),
-            "timestamp": datetime.now().strftime('%H:%M:%S')
+        log_entry = {
+            "epoch": epoch + 1, "train_loss": t_loss, "train_acc": t_acc,
+            "val_loss": v_loss, "val_acc": v_acc, "duration": duration
         }
-        history.append(epoch_log)
+        history.append(log_entry)
 
-        print(f"✅ Epoch {epoch+1} 종료 | Val Acc: {v_acc:.4f} | Time: {duration:.1f}s")
+        print(f"✅ Epoch {epoch+1}: Val Loss={v_loss:.4f}, Val Acc={v_acc:.4f} ({duration:.1f}s)")
 
-        if v_acc > best_acc:
-            best_acc = v_acc
+        # Early Stopping & Model Save
+        if v_loss < best_val_loss:
+            best_val_loss = v_loss
+            early_stop_counter = 0
             torch.save(model.state_dict(), MODEL_PATH)
-            print(f"⭐ Best Model Saved (Acc: {best_acc:.4f})")
+            print(f"⭐ Best Model Saved (Loss: {best_val_loss:.4f})")
+        else:
+            early_stop_counter += 1
+            if early_stop_counter >= PATIENCE:
+                print(f"🛑 조기 종료 (Early Stopping) 적용됨!")
+                break
 
-    # CSV 파일로 최종 저장
-    df = pd.DataFrame(history)
-    df.to_csv(LOG_FILE, index=False)
-    print(f"\n📑 상세 학습 로그 저장 완료: {LOG_FILE}")
-    return df
+    pd.DataFrame(history).to_csv(LOG_FILE, index=False)
+    print(f"📑 로그 저장 완료: {LOG_FILE}")
+    plot_history(pd.DataFrame(history))
 
+# --- 학습 결과 시각화 ---
 def plot_history(df=None):
-    """CSV 로그를 읽어와서 상세한 분석 그래프 생성"""
     if df is None:
         if not os.path.exists(LOG_FILE):
-            # 가장 최근 로그 파일을 찾음
             log_files = [os.path.join(LOG_DIR, f) for f in os.listdir(LOG_DIR) if f.endswith('.csv')]
-            if not log_files: return print("❌ 로그 파일이 없습니다.")
-            LOG_FILE_LATEST = max(log_files, key=os.path.getctime)
-            df = pd.read_csv(LOG_FILE_LATEST)
+            if not log_files: return print("❌ 로그가 없습니다.")
+            df = pd.read_csv(max(log_files, key=os.path.getctime))
         else:
             df = pd.read_csv(LOG_FILE)
 
-    plt.figure(figsize=(15, 6))
-    
-    # 1. Loss 그래프
+    plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
-    plt.plot(df['epoch'], df['train_loss'], 'o-', label='Train Loss', color='blue')
-    plt.plot(df['epoch'], df['val_loss'], 'o-', label='Val Loss', color='red')
-    plt.fill_between(df['epoch'], df['train_loss'], df['val_loss'], color='gray', alpha=0.1)
-    plt.title('Training & Validation Loss', fontsize=12)
-    plt.xlabel('Epochs'); plt.ylabel('Loss'); plt.legend(); plt.grid(True, alpha=0.3)
+    plt.plot(df['epoch'], df['train_loss'], label='Train Loss')
+    plt.plot(df['epoch'], df['val_loss'], label='Val Loss')
+    plt.title('Loss Trend'); plt.legend()
 
-    # 2. Accuracy 그래프
     plt.subplot(1, 2, 2)
-    plt.plot(df['epoch'], df['train_acc'], 'o-', label='Train Acc', color='green')
-    plt.plot(df['epoch'], df['val_acc'], 'o-', label='Val Acc', color='orange')
-    plt.axhline(y=max(df['val_acc']), color='r', linestyle='--', alpha=0.5, label=f'Best: {max(df["val_acc"]):.4f}')
-    plt.title('Training & Validation Accuracy', fontsize=12)
-    plt.xlabel('Epochs'); plt.ylabel('Accuracy'); plt.legend(); plt.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig(PLOT_FILE)
-    plt.close()
-    print(f"📈 상세 분석 그래프 저장 완료: {PLOT_FILE}")
-
-# [추가] 최종 테스트 함수
-def test_model(model, test_loader):
-    print("\n🔍 Test Set 평가 및 이미지 분석을 시작합니다...")
-    model.eval()
-    all_preds = []
-    all_labels = []
+    plt.plot(df['epoch'], df['train_acc'], label='Train Acc')
+    plt.plot(df['epoch'], df['val_acc'], label='Val Acc')
+    plt.title('Accuracy Trend'); plt.legend()
     
-    # 1. 모든 예측값 수집
+    plt.savefig(PLOT_FILE); plt.close()
+    print(f"📈 그래프 저장 완료: {PLOT_FILE}")
+
+# --- 최종 테스트 및 사례 분석 ---
+def test_model(model, test_loader):
+    print("\n🔍 Test Set 평가 시작...")
+    model.eval()
+    all_preds, all_labels, all_probs = [], [], []
+    
     with torch.no_grad():
         for images, labels in tqdm(test_loader, desc="Testing"):
             images, labels = images.to(DEVICE), labels.to(DEVICE)
             outputs = model(images)
-            _, preds = torch.max(outputs, 1)
-            
-            all_preds.extend(preds.cpu().numpy())
+            probs = F.softmax(outputs, dim=1)
+            all_preds.extend(outputs.argmax(1).cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
+            all_probs.extend(probs.cpu().numpy())
 
-    all_preds = np.array(all_preds)
-    all_labels = np.array(all_labels)
-    
-    # 성능 보고서 출력
-    print("\n📊 [Test Classification Report]")
+    all_preds, all_labels = np.array(all_preds), np.array(all_labels)
+    print("\n📊 [Test Report]")
     print(classification_report(all_labels, all_preds, target_names=CLASS_NAMES))
-    
-    # 2. 맞춘/틀린 인덱스 추출
+
+    # 성공/실패 이미지 저장
     correct_idx = np.where(all_preds == all_labels)[0]
     wrong_idx = np.where(all_preds != all_labels)[0]
 
-    # 3. 분석용 이미지 추출 함수 (에러 방지를 위해 DataLoader에서 직접 추출)
-    def save_analysis_images(indices, title, filename):
-        if len(indices) == 0:
-            print(f"ℹ️ {title} 사례가 없어 건너뜁니다.")
-            return
-        
-        display_num = min(len(indices), 10)
-        target_indices = indices[:display_num] # 앞에서부터 최대 10개만 선택
-        
-        plt.figure(figsize=(20, 10))
-        
-        # 선택된 인덱스의 이미지만 DataLoader에서 다시 가져오기
-        count = 0
-        for i, (img, lbl) in enumerate(test_loader.dataset):
-            if i in target_indices:
-                # tensor를 numpy 이미지로 변환
-                img_display = img.permute(1, 2, 0).numpy()
-                img_display = (img_display - img_display.min()) / (img_display.max() - img_display.min())
-                
-                plt.subplot(2, 5, count + 1)
-                plt.imshow(img_display)
-                color = 'blue' if title == "Success" else 'red'
-                
-                # 예측값 찾기 (전체 리스트에서의 인덱스 i 사용)
-                pred_name = CLASS_NAMES[all_preds[i]]
-                true_name = CLASS_NAMES[all_labels[i]]
-                
-                plt.title(f"True: {true_name}\nPred: {pred_name}", color=color)
-                plt.axis('off')
-                count += 1
-                if count >= display_num: break
+    def save_samples(indices, title, filename):
+        if len(indices) == 0: return
+        plt.figure(figsize=(15, 7))
+        for i, idx in enumerate(indices[:10]):
+            color = 'blue' if title == "Success" else 'red'
+            img, _ = test_loader.dataset[idx]
+            img = (img.permute(1, 2, 0).numpy() - img.min().item()) / (img.max().item() - img.min().item())
+            plt.subplot(2, 5, i+1)
+            plt.imshow(img)
+            plt.title(f"T:{CLASS_NAMES[all_labels[idx]]}\nP:{CLASS_NAMES[all_preds[idx]]}", color=color)
+            plt.axis('off')
+        plt.savefig(os.path.join(LOG_DIR, f"{filename}_{TIMESTAMP}.png")); plt.close()
 
-        plt.suptitle(f"{title} Examples", fontsize=20)
-        save_path = os.path.join(LOG_DIR, f"{filename}_{TIMESTAMP}.png")
-        plt.savefig(save_path)
-        plt.close()
-        print(f"📸 {title} 분석 이미지 저장 완료: {save_path}")
-
-    # 성공/실패 사례 시각화 실행
-    save_analysis_images(correct_idx, "Success", "analysis_success")
-    save_analysis_images(wrong_idx, "Failure", "analysis_failure")
-
-    # 4. 혼동 행렬 저장
+    save_samples(correct_idx, "Success", "analysis_success")
+    save_samples(wrong_idx, "Failure", "analysis_failure")
+    
+    # 혼동 행렬
     cm = confusion_matrix(all_labels, all_preds)
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=CLASS_NAMES, yticklabels=CLASS_NAMES)
-    plt.xlabel('Predicted'); plt.ylabel('Actual'); plt.title('Confusion Matrix')
-    plt.savefig(os.path.join(LOG_DIR, f"confusion_matrix_{TIMESTAMP}.png"))
-    plt.close()
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', xticklabels=CLASS_NAMES, yticklabels=CLASS_NAMES, cmap='Blues')
+    plt.savefig(os.path.join(LOG_DIR, f"cm_{TIMESTAMP}.png")); plt.close()
 
+# --- Grad-CAM (XAI) ---
+class GradCAM:
+    def __init__(self, model, target_layer):
+        self.model = model
+        self.target_layer = target_layer
+        self.gradients, self.activations = None, None
+        target_layer.register_forward_hook(lambda m, i, o: setattr(self, 'activations', o))
+        target_layer.register_full_backward_hook(lambda m, gi, go: setattr(self, 'gradients', go[0]))
+
+    def generate(self, input_image, class_idx):
+        self.model.zero_grad()
+        output = self.model(input_image)
+        output[0, class_idx].backward()
+        weights = torch.mean(self.gradients, dim=(2, 3), keepdim=True)
+        cam = torch.sum(weights * self.activations, dim=1).squeeze().detach().cpu().numpy()
+        return np.maximum(cam, 0), F.softmax(output, dim=1)[0, class_idx].item()
+
+
+def run_explainable_ai(model, test_loader):
+    print("\n🔬 Grad-CAM 분석을 통한 성공/실패 사례 심층 분석을 시작합니다...")
+    model.eval()
+    
+    # 1. Grad-CAM 생성기 설정
+    target_layer = model.layer4[-1] # ResNet50의 마지막 컨볼루션 층
+    cam_gen = GradCAM(model, target_layer)
+    
+    success_sample = None
+    failure_sample = None
+
+    # 2. 테스트 세트에서 성공/실패 케이스 탐색
+    with torch.no_grad():
+        for images, labels in test_loader:
+            images, labels = images.to(DEVICE), labels.to(DEVICE)
+            outputs = model(images)
+            _, preds = torch.max(outputs, 1)
+            probs = F.softmax(outputs, dim=1)
+
+            for i in range(len(images)):
+                is_correct = (preds[i] == labels[i])
+                sample_data = {
+                    'img': images[i:i+1],
+                    'label': labels[i].item(),
+                    'pred': preds[i].item(),
+                    'prob': probs[i][preds[i]].item()
+                }
+
+                if is_correct and success_sample is None:
+                    success_sample = sample_data
+                elif not is_correct and failure_sample is None:
+                    failure_sample = sample_data
+
+                if success_sample and failure_sample: break
+            if success_sample and failure_sample: break
+
+    # 3. 시각화 리포트 생성
+    samples = [("Success Case", success_sample), ("Failure Case", failure_sample)]
+    plt.figure(figsize=(15, 10))
+
+    for idx, (title, data) in enumerate(samples):
+        if data is None: continue
+        
+        # Grad-CAM 생성 (class_idx는 모델이 예측한 클래스를 기준으로 생성)
+        cam, _ = cam_gen.generate(data['img'], data['pred'])
+        
+        # 원본 이미지 복원 (0~1 range)
+        orig_img = data['img'][0].permute(1, 2, 0).cpu().numpy()
+        orig_img = (orig_img - orig_img.min()) / (orig_img.max() - orig_img.min())
+
+        # 왼쪽: 원본 이미지
+        plt.subplot(2, 2, idx*2 + 1)
+        plt.imshow(orig_img)
+        color = 'blue' if title == "Success Case" else 'red'
+        plt.title(f"[{title}]\nTrue: {CLASS_NAMES[data['label']]}\nPred: {CLASS_NAMES[data['pred']]} ({data['prob']:.2f})", color=color)
+        plt.axis('off')
+
+        # 오른쪽: Grad-CAM 히트맵
+        plt.subplot(2, 2, idx*2 + 2)
+        plt.imshow(orig_img) # 배경으로 원본 깔아주기
+        plt.imshow(cam, cmap='jet', alpha=0.5) # 그 위에 히트맵 겹치기(alpha로 투명도 조절)
+        plt.title(f"Grad-CAM (Focus on {CLASS_NAMES[data['pred']]})")
+        plt.axis('off')
+
+    plt.tight_layout()
+    save_path = os.path.join(LOG_DIR, f"XAI_Comparison_{TIMESTAMP}.png")
+    plt.savefig(save_path)
+    plt.close()
+    print(f"✅ 성공/실패 비교 Grad-CAM 저장 완료: {save_path}")
+
+# --- 메인 함수 ---
 def main():
     model = create_model()
     while True:
-        print(f"\n=== 🚀 Gastric Cancer AI Analysis System ===")
-        print("1. 모델 학습 및 상세 기록 시작")
-        print("2. 학습 결과 시각화 (PNG)")
-        print("3. 모델 파일 내보내기 (Export)")
-        print("4. 최종 테스트 (Test Set 평가)") # 메뉴 추가
-        print("5. 종료")
-        choice = input("번호를 입력하세요: ")
+        print(f"\n=== 🏥 Healthcare AI Research System (V2) ===")
+        print("1. [Train] 학습 및 조기종료 적용")
+        print("2. [Verify] 학습 결과 시각화")
+        print("3. [Test] 최종 성능 평가 & 사례 분석")
+        print("4. [XAI] Grad-CAM 판단 근거 확인")
+        print("5. [Export] 모델 내보내기")
+        print("0. 종료")
+        choice = input("선택: ")
 
         if choice == '1':
             train_loader = get_loader(IMG_TRAIN_DIR, None, BATCH_SIZE, get_transforms('clf', 512, True), 'clf')
@@ -249,19 +293,15 @@ def main():
         elif choice == '2':
             plot_history()
         elif choice == '3':
-            if os.path.exists(MODEL_PATH):
-                name = input("저장할 파일명: ")
-                target = os.path.join(BASE_DIR, name + ".pth" if not name.endswith(".pth") else name)
-                shutil.copy2(MODEL_PATH, target)
-                print(f"✅ Export 완료: {target}")
-            else: print("❌ 저장된 모델이 없습니다.")
-        elif choice == '4':
-            if not os.path.exists(IMG_TEST_DIR):
-                print(f"❌ Test 데이터 경로가 없습니다: {IMG_TEST_DIR}")
-                continue
-            test_loader = get_loader(IMG_TEST_DIR, None, 16, get_transforms('clf', 512, False), 'clf', shuffle=False)
+            test_loader = get_loader(IMG_TEST_DIR, None, BATCH_SIZE, get_transforms('clf', 512, False), 'clf', shuffle=False)
             test_model(model, test_loader)
-        elif choice == '5': break
+        elif choice == '4':
+            test_loader = get_loader(IMG_TEST_DIR, None, 1, get_transforms('clf', 512, False), 'clf')
+            run_explainable_ai(model, test_loader)
+        elif choice == '5':
+            name = input("파일명: ")
+            shutil.copy2(MODEL_PATH, os.path.join(BASE_DIR, name + ".pth"))
+        elif choice == '0': break
 
 if __name__ == "__main__":
     main()
