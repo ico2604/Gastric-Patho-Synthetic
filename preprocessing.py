@@ -6,7 +6,8 @@ import os
 
 # 경로 설정
 dataset_path = './data/raw' # r을 붙여서 백슬래시 문제를 방지합니다.
-d_cats = ['Training', 'Validation']
+d_cats = ['Training', 'Validation', 'Test']
+# d_cats = ['Test']
 
 for d in d_cats:
     print(f"\n[{d}] 데이터 처리 시작...")

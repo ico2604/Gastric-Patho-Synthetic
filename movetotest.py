@@ -11,12 +11,12 @@ test_path = os.path.join(base_path, 'Test')
 df = pd.read_csv(os.path.join(train_path, 'label.csv'))
 
 # 2. 각 항목당 무조건 250개씩 추출
-unique_cats = df['tumor_category'].unique()
+unique_cats = df['category'].unique()
 test_rows = []
 
 for cat in unique_cats:
-    cat_df = df[df['tumor_category'] == cat]
-    sample_n = min(len(cat_df), 500)
+    cat_df = df[df['category'] == cat]
+    sample_n = min(len(cat_df), 250)
     test_rows.append(cat_df.sample(n=sample_n, random_state=42))
 
 test_df = pd.concat(test_rows).reset_index(drop=True)

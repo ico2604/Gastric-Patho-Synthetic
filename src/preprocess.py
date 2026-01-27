@@ -36,14 +36,12 @@ def run_preprocessing(mode="all", target_size=(512, 512)):
     # 1. 경로 설정
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
-    # 처리할 데이터 스플릿 (Test 추가)
     if mode == "all":
         splits = ["Training", "Validation", "Test"]
     else:
         splits = [mode]
         
     for split in splits:
-        # 데이터셋 규칙 적용 (학습=T, 검증=V, 테스트=S)
         if split == "Training":
             raw_prefix, label_prefix = "TS", "TL"
         elif split == "Validation":
@@ -51,13 +49,14 @@ def run_preprocessing(mode="all", target_size=(512, 512)):
         else: # Test
             raw_prefix, label_prefix = "TS", "TL"
         
+        # 원본 데이터 경로
         raw_base = os.path.join(base_dir, "data", "raw", split, "01.원천데이터")
         label_base = os.path.join(base_dir, "data", "raw", split, "02.라벨링데이터")
         
-        processed_img_base = os.path.join(base_dir, "data", "processed", "images_512", split)
-        processed_mask_base = os.path.join(base_dir, "data", "processed", "masks", split)
+        # [수정 부분] 저장 경로 설정: split 뒤에 01.원천데이터 / 02.라벨링데이터 추가
+        processed_img_base = os.path.join(base_dir, "data", "processed", "images_512", split, "01.원천데이터")
+        processed_mask_base = os.path.join(base_dir, "data", "processed", "masks", split, "02.라벨링데이터")
 
-        # 질환 카테고리
         disease_names = ["미만형선암", "위염", "장형선암", "혼합형선암"]
 
         for disease in disease_names:
@@ -68,12 +67,11 @@ def run_preprocessing(mode="all", target_size=(512, 512)):
             json_dir = os.path.join(label_base, label_cat_dir)
             
             if not os.path.exists(img_dir):
-                print(f"Skipping {img_dir} (폴더 없음)")
                 continue
                 
             img_paths = glob(os.path.join(img_dir, "*.png"))
             
-            # 저장 경로 생성
+            # 하위 카테고리 폴더(예: TS_미만형선암)까지 포함하여 생성
             save_img_dir = os.path.join(processed_img_base, raw_cat_dir)
             save_mask_dir = os.path.join(processed_mask_base, label_cat_dir)
             os.makedirs(save_img_dir, exist_ok=True)
@@ -88,30 +86,27 @@ def run_preprocessing(mode="all", target_size=(512, 512)):
                 if not os.path.exists(json_path):
                     continue
                 
-                # 이미지 읽기
+                # 이미지 처리 및 리사이징
                 img_array = np.fromfile(img_path, np.uint8)
                 img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
                 if img is None: continue
-
-                # 리사이징
                 img_resized = cv2.resize(img, target_size, interpolation=cv2.INTER_AREA)
                 
-                # 마스크 생성 및 리사이징
+                # 마스크 처리 및 리사이징
                 mask = generate_mask(json_path, shape=(img.shape[0], img.shape[1]))
                 mask_resized = cv2.resize(mask, target_size, interpolation=cv2.INTER_NEAREST)
 
-                # 이미지 저장
+                # 이미지 저장 (01.원천데이터 하위)
                 img_save_path = os.path.join(save_img_dir, file_name)
                 _, encoded_img = cv2.imencode(".png", img_resized)
                 with open(img_save_path, mode='w+b') as f:
                     encoded_img.tofile(f)
                 
-                # 마스크 저장
+                # 마스크 저장 (02.라벨링데이터 하위)
                 mask_save_path = os.path.join(save_mask_dir, file_name)
                 _, encoded_mask = cv2.imencode(".png", mask_resized)
                 with open(mask_save_path, mode='w+b') as f:
                     encoded_mask.tofile(f)
 
 if __name__ == "__main__":
-    # "all"로 설정하면 Training, Validation, Test를 한 번에 다 처리합니다.
     run_preprocessing(mode="all")

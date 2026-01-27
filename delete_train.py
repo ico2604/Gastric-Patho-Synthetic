@@ -13,10 +13,10 @@ deleted_path = os.path.join(base_path, 'Deleted_Train')
 df = pd.read_csv(os.path.join(train_path, 'label.csv'))
 
 # 2. 클래스별로 남길 개수 설정 (예: 클래스당 1000개만 남기기)
-keep_n = 1000 
+keep_n = 750 
 
 # 남길 데이터와 삭제할 데이터 분리
-keep_df = df.groupby('tumor_category', group_keys=False).apply(lambda x: x.sample(n=min(len(x), keep_n), random_state=42)).reset_index(drop=True)
+keep_df = df.groupby('category', group_keys=False).apply(lambda x: x.sample(n=min(len(x), keep_n), random_state=42)).reset_index(drop=True)
 delete_df = df[~df['file_name'].isin(keep_df['file_name'])].reset_index(drop=True)
 
 print(f"남길 데이터 개수: {len(keep_df)}개")

@@ -114,7 +114,9 @@ def model_evaluate(model, data_loader, loss_fn, device):
         f1 = f1_score(np.concatenate(gts), np.concatenate(preds), average='macro')
         return running_loss / len(data_loader.dataset), acc, f1
 
-
+    
+save_weight_dir = './weights'
+os.makedirs(save_weight_dir, exist_ok=True)
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
@@ -123,8 +125,8 @@ if __name__=='__main__':
     parser.add_argument('--LR',     type=float, default=4e-06)
     parser.add_argument('--WD',     type=float, default=0.9)
     parser.add_argument('--img_size',     type=int, default=256)    
-    parser.add_argument('--train_path', type=str, default='./data/Training')
-    parser.add_argument('--valid_path', type=str, default='./data/Validation')
+    parser.add_argument('--train_path', type=str, default='..\\data\\processed\\images_512\\Training')
+    parser.add_argument('--valid_path', type=str, default='..\\data\\processed\\images_512\\Validation')
     parser.add_argument('--verbose', type=bool, default=True)
     print(f"{time_log()} [INFO] START ....")
     
@@ -158,7 +160,7 @@ if __name__=='__main__':
     train_data = CustomDataset(train_path, transform=image_transform)
     valid_data = CustomDataset(valid_path, transform=validation_transform)
 
-    num_workers = 24
+    num_workers = 0
 
     train_loader = DataLoader(train_data, 
                               batch_size=batch_size,
@@ -181,7 +183,6 @@ if __name__=='__main__':
     optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WD)
     loss_fn = nn.CrossEntropyLoss()
     min_loss = np.inf
-    
 
         
 # Epoch 별 훈련 및 검증을 수행합니다.
@@ -198,7 +199,7 @@ if __name__=='__main__':
         # val_loss 가 개선되었다면 min_loss를 갱신하고 model의 가중치(weights)를 저장합니다.
         if val_loss < min_loss:
             min_loss = val_loss
-            torch.save(model.state_dict(), f'best_model.pth')
+            torch.save(model.state_dict(), os.path.join(save_weight_dir, 'best_model.pth'))
 
         # Epoch 별 결과를 출력합니다.
         print(f'{time_log()} [INFO] Epoch {epoch+1:02d}, loss: {train_loss:.5f}, acc: {train_acc:.5f}, val_loss: {val_loss:.5f}, val_accuracy: {val_acc:.5f}, val_F1: {val_f1:.5f}')
