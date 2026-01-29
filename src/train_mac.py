@@ -147,102 +147,90 @@ def model_evaluate(model, data_loader, loss_fn, device):
 
 
 
-if __name__=='__main__':
+import os
+import argparse
+
+if __name__ == '__main__':
+    # 1. 경로 및 인자 설정
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    default_train_path = os.path.join(BASE_DIR, 'data/processed/images_512/Training')
+    default_valid_path = os.path.join(BASE_DIR, 'data/processed/images_512/Validation')
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs',          type=int,   default=20)
-    parser.add_argument('--batch_size',     type=int,   default=64)
-    parser.add_argument('--LR',     type=float, default=4e-06)
-    parser.add_argument('--WD',     type=float, default=0.9)
-    parser.add_argument('--img_size',     type=int, default=256)    
-    parser.add_argument('--train_path', type=str, default='./data/Training')
-    parser.add_argument('--valid_path', type=str, default='./data/Validation')
-    parser.add_argument('--verbose', type=bool, default=True)
-    print(f"{time_log()} [INFO] START ....")
-    
-    args  = parser.parse_args()
+    parser.add_argument('--epochs',     type=int,   default=10)
+    parser.add_argument('--batch_size', type=int,   default=16)
+    parser.add_argument('--LR',         type=float, default=4e-06)
+    parser.add_argument('--WD',         type=float, default=0.1)
+    parser.add_argument('--img_size',   type=int,   default=224)
+    parser.add_argument('--num_workers', type=int,   default=4)    
+    parser.add_argument('--train_path',  type=str,   default=default_train_path)
+    parser.add_argument('--valid_path',  type=str,   default=default_valid_path)
+    parser.add_argument('--verbose',     type=int,   default=1) # 1이면 진행바 출력
+
+    args = parser.parse_args()
     
     epochs = args.epochs
-    batch_size=args.batch_size
-    LR=args.LR
-    WD=args.WD
-    img_size=args.img_size
-    train_path=args.train_path
+    batch_size = args.batch_size
+    LR = args.LR
+    WD = args.WD
+    img_size = args.img_size
+    train_path = args.train_path
     valid_path = args.valid_path
     verbose = args.verbose
-    
+
+    # 2. Device 설정 (맥북 GPU 활성화 핵심)
     if torch.backends.mps.is_available():
-            device = torch.device("mps")
-            print(f"{time_log()} [INFO] Using Apple Silicon GPU (MPS)")
+        device = torch.device("mps")
     elif torch.cuda.is_available():
         device = torch.device("cuda")
-        print(f"{time_log()} [INFO] Using NVIDIA GPU (CUDA)")
     else:
         device = torch.device("cpu")
-        print(f"{time_log()} [INFO] Using CPU")
+    print(f"{time_log()} [INFO] Using Device: {device}")
 
-    image_transform = transforms.Compose(
-        [
-            transforms.ToTensor(), 
-            transforms.Resize(img_size),          
-            transforms.RandomHorizontalFlip(0.5), 
-            transforms.RandomVerticalFlip(0.5),
-        ]
-    )
+    # 3. 데이터 전처리 및 로더
+    image_transform = transforms.Compose([
+        transforms.ToTensor(), 
+        transforms.Resize((img_size, img_size)),
+        transforms.RandomHorizontalFlip(0.5), 
+        transforms.RandomVerticalFlip(0.5),
+    ])
 
-    validation_transform = transforms.Compose(
-        [
-            transforms.ToTensor(), 
-            transforms.Resize(img_size)
-        ]
-    )
+    validation_transform = transforms.Compose([
+        transforms.ToTensor(), 
+        transforms.Resize((img_size, img_size))
+    ])
+
     print(f"{time_log()} [INFO] Load Dataset")
     train_data = CustomDataset(train_path, transform=image_transform)
     valid_data = CustomDataset(valid_path, transform=validation_transform)
 
-    num_workers = 24
-
-    train_loader = DataLoader(train_data, 
-                              batch_size=batch_size,
-                              shuffle=True, 
-                              num_workers=num_workers
-                             )
-    valid_loader = DataLoader(valid_data, 
-                             batch_size=batch_size,
-                             shuffle=False, 
-                             num_workers=num_workers
-                            )
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, 
+                              num_workers=args.num_workers, pin_memory=True)
+    valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False, 
+                             num_workers=args.num_workers, pin_memory=True)
     
+    # 4. 모델 로드 및 GPU 이동
     print(f"{time_log()} [INFO] Load Model")
-    
     model = torchvision.models.efficientnet_v2_s(weights=torchvision.models.EfficientNet_V2_S_Weights.IMAGENET1K_V1)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.classifier[1] = torch.nn.Linear(in_features=1280, out_features=len(train_data.classes), bias=True)
     model.to(device)
     
     optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WD)
     loss_fn = nn.CrossEntropyLoss()
     min_loss = np.inf
-    
 
-        
-# Epoch 별 훈련 및 검증을 수행합니다.
+    # 5. 학습 시작
     print(f"{time_log()} [INFO] Start Training")
     start_time = time.time()
     for epoch in range(epochs):
-        # Model Training
-        # 훈련 손실과 정확도를 반환 받습니다.
         train_loss, train_acc = model_train(model, train_loader, loss_fn, optimizer, device, verbose)
-
-        # 검증 손실과 검증 정확도를 반환 받습니다.
         val_loss, val_acc, val_f1 = model_evaluate(model, valid_loader, loss_fn, device) 
 
-        # val_loss 가 개선되었다면 min_loss를 갱신하고 model의 가중치(weights)를 저장합니다.
         if val_loss < min_loss:
             min_loss = val_loss
-            torch.save(model.state_dict(), f'best_model.pth')
+            torch.save(model.state_dict(), 'best_model.pth')
 
-        # Epoch 별 결과를 출력합니다.
         print(f'{time_log()} [INFO] Epoch {epoch+1:02d}, loss: {train_loss:.5f}, acc: {train_acc:.5f}, val_loss: {val_loss:.5f}, val_accuracy: {val_acc:.5f}, val_F1: {val_f1:.5f}')
-    time_spent = time.time()-start_time
-    print(f"{time_log()} [INFO] End Training  ----{ int(time_spent//60)}:{time_spent%60:.2f} spent ----")
-            
+
+    time_spent = time.time() - start_time
+    print(f"{time_log()} [INFO] End Training ----{int(time_spent//60)}:{time_spent%60:.2f} spent ----")

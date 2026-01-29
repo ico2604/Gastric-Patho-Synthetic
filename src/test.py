@@ -37,6 +37,7 @@ def time_log():
 
 def single_infer(file_path, model, device, img_size=256):
    
+
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Resize(img_size)
@@ -104,26 +105,36 @@ if __name__=='__main__':
     print(f"{time_log()} [INFO] Start Test ...")
     start_time = time.time()
     
-    target_df = pd.read_csv(os.path.join(test_path,'label.csv'))
+    target_df = pd.read_csv(os.path.join(test_path,'label1.csv'))
     
     predict_ = []
     
     print(f"{time_log()} [INFO] Strat Prediction ...")
     for i in tqdm(target_df['file_name']):
-            output = single_infer(os.path.join(test_path, '01.원천데이터', i), model, device)
-            
-            # 수정된 부분: 경로 구분자에 상관없이 파일명과 상위 폴더(label) 추출
-            # i가 "normal/image.jpg" 혹은 "normal\image.jpg" 둘 다 대응 가능
-            path_parts = i.replace('\\', '/').split('/') 
-            label = path_parts[-2] # 뒤에서 두 번째 (폴더명)
-            fname = path_parts[-1] # 마지막 (파일명)
-            
-            predict_.append(
-                {
-                    'file_name': os.path.join(label, fname),
-                    'prediction': output
-                }
-            )
+        # 1. i 내부에 섞여 있을지 모를 역슬래시(\)를 슬래시(/)로 통합 (맥/리눅스 대응)
+        # 윈도우에서도 슬래시(/)는 경로 구분자로 잘 작동합니다.
+        i_normalized = i.replace('\\', '/')
+        
+        # 2. os.path.join을 사용하여 경로 결합
+        full_path = os.path.join(test_path, '01.원천데이터', i_normalized)
+        
+        # 3. 모델 추론 실행
+        output = single_infer(full_path, model, device)
+        
+        # 4. 경로 분해 및 저장용 경로 생성
+        path_parts = i_normalized.split('/') 
+        
+        # 파일명만 있거나 경로가 짧을 경우를 대비한 안전장치
+        label = path_parts[-2] if len(path_parts) > 1 else ""
+        fname = path_parts[-1]
+        
+        predict_.append(
+            {
+                # os.path.join은 실행 환경(OS)에 맞춰서 다시 경로를 합쳐줍니다.
+                'file_name': os.path.join(label, fname),
+                'prediction': output
+            }
+        )
     time_spent = time.time()-start_time
     print(f"{time_log()} [INFO] End Prediction  ----{ int(time_spent//60)}:{time_spent%60:.2f} spent ----")
     
@@ -134,7 +145,7 @@ if __name__=='__main__':
     print(f"{time_log()} [INFO] Result Saved ... to {save_path}")
 
     
-    # gt = pd.read_csv(os.path.join(test_path,'label.csv'))
+    # gt = pd.read_csv(os.path.join(test_path,'label1.csv'))
     # gt['tumor_category_idx'] = gt['tumor_category'].apply(lambda x: class_dict[x])
     
     # pred = pd.read_csv(test_path+'/prediction.csv')
@@ -144,7 +155,7 @@ if __name__=='__main__':
     # print(f"{time_log()} [INFO] Calculate F1 Score : {f1}")
     # print(f"{time_log()} [INFO] Time Spent : {time.time()-start_time} Seconds")
 
-    gt = pd.read_csv(os.path.join(test_path, 'label.csv'))
+    gt = pd.read_csv(os.path.join(test_path, 'label1.csv'))
     gt['tumor_category_idx'] = gt['tumor_category'].apply(lambda x: class_dict[x])
     pred = pd.read_csv(test_path + '/prediction.csv')
 
