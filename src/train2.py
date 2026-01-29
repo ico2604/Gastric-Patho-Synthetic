@@ -185,7 +185,7 @@ if __name__=='__main__':
     model = torchvision.models.efficientnet_v2_s(weights=torchvision.models.EfficientNet_V2_S_Weights.IMAGENET1K_V1)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.classifier[1] = torch.nn.Linear(in_features=1280, out_features=len(train_data.classes), bias=True)
-    model.to(device)
+    model.to(device)    
     
     optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WD)
     loss_fn = nn.CrossEntropyLoss()

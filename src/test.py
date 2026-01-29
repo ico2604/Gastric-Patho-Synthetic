@@ -28,7 +28,7 @@ cudnn.benchmark = False
 cudnn.deterministic = True
 random.seed(0)
 
-class_dict = {'normal':0, 'abnormal':1 }
+class_dict = {'normal': 0, 'abnormal': 1}
 
 
 def time_log():
@@ -54,7 +54,7 @@ def single_infer(file_path, model, device, img_size=256):
 
 def load_model(device, weight_path ='./weights/best_model.pth'):
     model = torchvision.models.efficientnet_v2_s()
-    model.classifier[1]=nn.Linear(in_features=1280, out_features=2, bias=True)
+    model.classifier[1]=nn.Linear(in_features=1280, out_features=4, bias=True)
     model.load_state_dict(torch.load(weight_path))
     model.to(device)
     model.eval()
@@ -108,22 +108,32 @@ if __name__=='__main__':
     
     predict_ = []
     
-    print(f"{time_log()} [INFO] Strat Prediction ...")
+    print(f"{time_log()} [INFO] Start Prediction ...")
     for i in tqdm(target_df['file_name']):
-            output = single_infer(os.path.join(test_path, '01.원천데이터', i), model, device)
-            
-            # 수정된 부분: 경로 구분자에 상관없이 파일명과 상위 폴더(label) 추출
-            # i가 "normal/image.jpg" 혹은 "normal\image.jpg" 둘 다 대응 가능
-            path_parts = i.replace('\\', '/').split('/') 
-            label = path_parts[-2] # 뒤에서 두 번째 (폴더명)
-            fname = path_parts[-1] # 마지막 (파일명)
-            
-            predict_.append(
-                {
-                    'file_name': os.path.join(label, fname),
-                    'prediction': output
-                }
-            )
+        # 1. i 내부에 섞여 있을지 모를 역슬래시(\)를 슬래시(/)로 통합 (맥/리눅스 대응)
+        # 윈도우에서도 슬래시(/)는 경로 구분자로 잘 작동합니다.
+        i_normalized = i.replace('\\', '/')
+        
+        # 2. os.path.join을 사용하여 경로 결합
+        full_path = os.path.join(test_path, '01.원천데이터', i_normalized)
+        
+        # 3. 모델 추론 실행
+        output = single_infer(full_path, model, device)
+        
+        # 4. 경로 분해 및 저장용 경로 생성
+        path_parts = i_normalized.split('/') 
+        
+        # 파일명만 있거나 경로가 짧을 경우를 대비한 안전장치
+        label = path_parts[-2] if len(path_parts) > 1 else ""
+        fname = path_parts[-1]
+        
+        predict_.append(
+            {
+                # os.path.join은 실행 환경(OS)에 맞춰서 다시 경로를 합쳐줍니다.
+                'file_name': os.path.join(label, fname),
+                'prediction': output
+            }
+        )
     time_spent = time.time()-start_time
     print(f"{time_log()} [INFO] End Prediction  ----{ int(time_spent//60)}:{time_spent%60:.2f} spent ----")
     
@@ -135,20 +145,20 @@ if __name__=='__main__':
 
     
     # gt = pd.read_csv(os.path.join(test_path,'label.csv'))
-    # gt['tumor_category_idx'] = gt['tumor_category'].apply(lambda x: class_dict[x])
+    # gt['category_idx'] = gt['category'].apply(lambda x: class_dict[x])
     
     # pred = pd.read_csv(test_path+'/prediction.csv')
-    # cm = confusion_matrix(np.array(gt['tumor_category_idx']), np.array(pred['prediction']))
+    # cm = confusion_matrix(np.array(gt['category_idx']), np.array(pred['prediction']))
     # print(f"{time_log()} [INFO] Calculate Confusion Matrix : \n{cm}")
-    # f1 = f1_score(gt['tumor_category_idx'], pred['prediction'], average='macro')
+    # f1 = f1_score(gt['category_idx'], pred['prediction'], average='macro')
     # print(f"{time_log()} [INFO] Calculate F1 Score : {f1}")
     # print(f"{time_log()} [INFO] Time Spent : {time.time()-start_time} Seconds")
 
     gt = pd.read_csv(os.path.join(test_path, 'label.csv'))
-    gt['tumor_category_idx'] = gt['tumor_category'].apply(lambda x: class_dict[x])
+    gt['category_idx'] = gt['category'].apply(lambda x: class_dict[x])
     pred = pd.read_csv(test_path + '/prediction.csv')
 
-    y_true = gt['tumor_category_idx']
+    y_true = gt['category_idx']
     y_pred = pred['prediction']
 
     # 주요 지표 계산
@@ -185,6 +195,6 @@ if __name__=='__main__':
 
     full_results = gt.copy()
     full_results['prediction'] = pred['prediction']
-    full_results['target'] = full_results['tumor_category_idx']
-    
+    full_results['target'] = full_results['category_idx']
+
     visualize_predictions(test_path, full_results, class_dict)
