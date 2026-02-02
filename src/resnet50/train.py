@@ -17,12 +17,16 @@ from torch.nn import functional as F
 # --- 경로 설정 ---
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.join(BASE_DIR, "src"))
+
 from data_loader import get_loader, get_transforms
 
 # --- 하이퍼파라미터 및 상세 설정 ---
 IMG_TRAIN_DIR = os.path.join(BASE_DIR, "data", "processed", "images_512", "Training")
 IMG_VAL_DIR = os.path.join(BASE_DIR, "data", "processed", "images_512", "Validation")
 IMG_TEST_DIR = os.path.join(BASE_DIR, "data", "processed", "images_512", "Test")
+JSON_TRAIN_DIR = os.path.join(BASE_DIR, "data", "raw", "Training", "02.라벨링데이터")
+JSON_VAL_DIR = os.path.join(BASE_DIR, "data", "raw", "Validation", "02.라벨링데이터")
+JSON_TEST_DIR = os.path.join(BASE_DIR, "data", "raw", "Test", "02.라벨링데이터")
 SAVE_DIR = os.path.join(BASE_DIR, "checkpoints")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(SAVE_DIR, exist_ok=True)
@@ -158,26 +162,6 @@ def test_model(model, test_loader):
     all_preds, all_labels = np.array(all_preds), np.array(all_labels)
     print("\n📊 [Test Report]")
     print(classification_report(all_labels, all_preds, target_names=CLASS_NAMES))
-
-    # 성공/실패 이미지 저장
-    correct_idx = np.where(all_preds == all_labels)[0]
-    wrong_idx = np.where(all_preds != all_labels)[0]
-
-    def save_samples(indices, title, filename):
-        if len(indices) == 0: return
-        plt.figure(figsize=(15, 7))
-        for i, idx in enumerate(indices[:10]):
-            color = 'blue' if title == "Success" else 'red'
-            img, _ = test_loader.dataset[idx]
-            img = (img.permute(1, 2, 0).numpy() - img.min().item()) / (img.max().item() - img.min().item())
-            plt.subplot(2, 5, i+1)
-            plt.imshow(img)
-            plt.title(f"T:{CLASS_NAMES[all_labels[idx]]}\nP:{CLASS_NAMES[all_preds[idx]]}", color=color)
-            plt.axis('off')
-        plt.savefig(os.path.join(LOG_DIR, f"{filename}_{TIMESTAMP}.png")); plt.close()
-
-    save_samples(correct_idx, "Success", "analysis_success")
-    save_samples(wrong_idx, "Failure", "analysis_failure")
     
     # 혼동 행렬
     cm = confusion_matrix(all_labels, all_preds)
@@ -202,19 +186,31 @@ class GradCAM:
         cam = torch.sum(weights * self.activations, dim=1).squeeze().detach().cpu().numpy()
         return np.maximum(cam, 0), F.softmax(output, dim=1)[0, class_idx].item()
 
-
 def run_explainable_ai(model, test_loader):
-    print("\n🔬 Grad-CAM 분석을 통한 성공/실패 사례 심층 분석을 시작합니다...")
-    model.eval()
+    print("\n" + "="*50)
+    print("🔍 [Interactive XAI Analysis] 특정 클래스 심층 분석")
+    print("="*50)
     
-    # 1. Grad-CAM 생성기 설정
-    target_layer = model.layer4[-1] # ResNet50의 마지막 컨볼루션 층
-    cam_gen = GradCAM(model, target_layer)
+    # 1. 사용자 입력 받기
+    for i, name in enumerate(CLASS_NAMES):
+        print(f"{i}: {name}")
     
-    success_sample = None
-    failure_sample = None
+    try:
+        target_class_idx = int(input(f"\n분석할 클래스 번호를 선택하세요 (0~{len(CLASS_NAMES)-1}): "))
+        num_samples = int(input("각 사례별(성공/실패) 분석할 샘플 개수를 입력하세요: "))
+        if num_samples <= 0: return print("❗ 개수는 1개 이상이어야 합니다.")
+    except ValueError:
+        return print("❗ 올바른 숫자를 입력해주세요.")
 
-    # 2. 테스트 세트에서 성공/실패 케이스 탐색
+    model.eval()
+    cam_gen = GradCAM(model, model.layer4[-1])
+    
+    success_list = []
+    failure_list = []
+
+    # 2. 데이터 탐색 (선택한 클래스에 해당하는 데이터만 수집)
+    print(f"\n📡 {CLASS_NAMES[target_class_idx]} 클래스의 샘플을 수집 중...")
+    
     with torch.no_grad():
         for images, labels in test_loader:
             images, labels = images.to(DEVICE), labels.to(DEVICE)
@@ -223,56 +219,70 @@ def run_explainable_ai(model, test_loader):
             probs = F.softmax(outputs, dim=1)
 
             for i in range(len(images)):
-                is_correct = (preds[i] == labels[i])
-                sample_data = {
-                    'img': images[i:i+1],
-                    'label': labels[i].item(),
-                    'pred': preds[i].item(),
-                    'prob': probs[i][preds[i]].item()
-                }
+                # 우리가 선택한 클래스가 실제 정답(Ground Truth)인 데이터만 추출
+                if labels[i].item() == target_class_idx:
+                    is_correct = (preds[i] == labels[i])
+                    sample_data = {
+                        'img': images[i:i+1],
+                        'label': labels[i].item(),
+                        'pred': preds[i].item(),
+                        'prob': probs[i][preds[i]].item()
+                    }
 
-                if is_correct and success_sample is None:
-                    success_sample = sample_data
-                elif not is_correct and failure_sample is None:
-                    failure_sample = sample_data
+                    if is_correct and len(success_list) < num_samples:
+                        success_list.append(sample_data)
+                    elif not is_correct and len(failure_list) < num_samples:
+                        failure_list.append(sample_data)
 
-                if success_sample and failure_sample: break
-            if success_sample and failure_sample: break
+            # 필요한 개수를 모두 채우면 중단
+            if len(success_list) >= num_samples and len(failure_list) >= num_samples:
+                break
 
-    # 3. 시각화 리포트 생성
-    samples = [("Success Case", success_sample), ("Failure Case", failure_sample)]
-    plt.figure(figsize=(15, 10))
+    # 3. 결과 검증: 샘플이 부족한 경우 사용자에게 알림
+    if not success_list and not failure_list:
+        return print(f"❗ 해당 클래스({CLASS_NAMES[target_class_idx]})에 대한 데이터를 찾을 수 없습니다.")
+    
+    print(f"✅ 수집 완료: 성공 {len(success_list)}건, 실패 {len(failure_list)}건")
 
-    for idx, (title, data) in enumerate(samples):
-        if data is None: continue
-        
-        # Grad-CAM 생성 (class_idx는 모델이 예측한 클래스를 기준으로 생성)
-        cam, _ = cam_gen.generate(data['img'], data['pred'])
-        
-        # 원본 이미지 복원 (0~1 range)
-        orig_img = data['img'][0].permute(1, 2, 0).cpu().numpy()
-        orig_img = (orig_img - orig_img.min()) / (orig_img.max() - orig_img.min())
+    # 4. 시각화 (동적으로 서브플롯 생성)
+    total_samples = len(success_list) + len(failure_list)
+    plt.figure(figsize=(12, 5 * total_samples))
 
-        # 왼쪽: 원본 이미지
-        plt.subplot(2, 2, idx*2 + 1)
-        plt.imshow(orig_img)
-        color = 'blue' if title == "Success Case" else 'red'
-        plt.title(f"[{title}]\nTrue: {CLASS_NAMES[data['label']]}\nPred: {CLASS_NAMES[data['pred']]} ({data['prob']:.2f})", color=color)
-        plt.axis('off')
+    current_plot = 1
+    # 성공/실패 데이터를 하나의 리스트로 합침
+    all_targets = [("Success", success_list), ("Failure", failure_list)]
 
-        # 오른쪽: Grad-CAM 히트맵
-        plt.subplot(2, 2, idx*2 + 2)
-        plt.imshow(orig_img) # 배경으로 원본 깔아주기
-        plt.imshow(cam, cmap='jet', alpha=0.5) # 그 위에 히트맵 겹치기(alpha로 투명도 조절)
-        plt.title(f"Grad-CAM (Focus on {CLASS_NAMES[data['pred']]})")
-        plt.axis('off')
+    for title_prefix, data_list in all_targets:
+        for data in data_list:
+            # Grad-CAM 생성
+            cam, _ = cam_gen.generate(data['img'], data['pred'])
+            
+            # 원본 이미지 복원
+            orig_img = data['img'][0].permute(1, 2, 0).cpu().numpy()
+            orig_img = (orig_img - orig_img.min()) / (orig_img.max() - orig_img.min())
+
+            # [왼쪽] 원본 이미지 + 정보
+            plt.subplot(total_samples, 2, current_plot)
+            plt.imshow(orig_img)
+            color = 'blue' if title_prefix == "Success" else 'red'
+            plt.title(f"[{title_prefix}]\nTrue: {CLASS_NAMES[data['label']]}\nPred: {CLASS_NAMES[data['pred']]} ({data['prob']:.2f})", color=color)
+            plt.axis('off')
+
+            # [오른쪽] Grad-CAM Overlay
+            plt.subplot(total_samples, 2, current_plot + 1)
+            plt.imshow(orig_img)
+            plt.imshow(cam, cmap='jet', alpha=0.4)
+            plt.title(f"Focus: {CLASS_NAMES[data['pred']]}")
+            plt.axis('off')
+            
+            current_plot += 2
 
     plt.tight_layout()
-    save_path = os.path.join(LOG_DIR, f"XAI_Comparison_{TIMESTAMP}.png")
+    save_filename = f"XAI_{CLASS_NAMES[target_class_idx]}_n{num_samples}_{TIMESTAMP}.png"
+    save_path = os.path.join(LOG_DIR, save_filename)
     plt.savefig(save_path)
     plt.close()
-    print(f"✅ 성공/실패 비교 Grad-CAM 저장 완료: {save_path}")
-
+    print(f"📊 상세 분석 리포트 저장 완료: {save_path}")
 # --- 메인 함수 ---
 def main():
     model = create_model()
@@ -287,16 +297,16 @@ def main():
         choice = input("선택: ")
 
         if choice == '1':
-            train_loader = get_loader(IMG_TRAIN_DIR, None, BATCH_SIZE, get_transforms('clf', 512, True), 'clf')
-            val_loader = get_loader(IMG_VAL_DIR, None, BATCH_SIZE, get_transforms('clf', 512, False), 'clf')
+            train_loader = get_loader(IMG_TRAIN_DIR, None, JSON_TRAIN_DIR, BATCH_SIZE, get_transforms('clf', 512, True), 'clf')
+            val_loader = get_loader(IMG_VAL_DIR, None, JSON_VAL_DIR, BATCH_SIZE, get_transforms('clf', 512, False), 'clf')
             train_and_validate(model, train_loader, val_loader)
         elif choice == '2':
             plot_history()
         elif choice == '3':
-            test_loader = get_loader(IMG_TEST_DIR, None, BATCH_SIZE, get_transforms('clf', 512, False), 'clf', shuffle=False)
+            test_loader = get_loader(IMG_TEST_DIR, None, JSON_TEST_DIR, BATCH_SIZE, get_transforms('clf', 512, False), 'clf', shuffle=False)
             test_model(model, test_loader)
         elif choice == '4':
-            test_loader = get_loader(IMG_TEST_DIR, None, 1, get_transforms('clf', 512, False), 'clf')
+            test_loader = get_loader(IMG_TEST_DIR, None, JSON_TEST_DIR, 1, get_transforms('clf', 512, False), 'clf')
             run_explainable_ai(model, test_loader)
         elif choice == '5':
             name = input("파일명: ")

@@ -51,7 +51,7 @@ venv/
 # 모델 체크포인트 제외
 checkpoints/*.pth
 checkpoints/*.onnx
-
+checkpoints/*
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
