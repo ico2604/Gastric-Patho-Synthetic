@@ -125,8 +125,8 @@ def model_evaluate(model, data_loader, loss_fn, device):
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs',       type=int,   default=20)
-    parser.add_argument('--batch_size',   type=int,   default=16)
+    parser.add_argument('--epochs',       type=int,   default=10)
+    parser.add_argument('--batch_size',   type=int,   default=4)
     parser.add_argument('--LR',           type=float, default=4e-06)
     parser.add_argument('--WD',           type=float, default=1e-4)
     parser.add_argument('--img_size',     type=int,   default=256)    
